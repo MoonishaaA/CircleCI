@@ -1,0 +1,48 @@
+version: 2.1
+
+jobs:
+  deploy:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      
+      - setup_remote_docker
+
+      - run:
+          name: Install gcloud
+          command: |
+            sudo apt update
+            sudo apt install -y apt-transport-https ca-certificates gnupg
+            echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+            curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+            sudo apt update
+            sudo apt install -y google-cloud-cli
+
+      - run:
+          name: Authenticate to GCP
+          command: |
+            echo $GCLOUD_SERVICE_KEY | base64 --decode > gcloud-key.json
+            gcloud auth activate-service-account --key-file=gcloud-key.json
+            gcloud config set project $GCP_PROJECT_ID
+
+      - run:
+          name: Build and Push Docker Image
+          command: |
+            gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+            docker build -t us-central1-docker.pkg.dev/$GCP_PROJECT_ID/nginx-repo/nginx:latest .
+            docker push us-central1-docker.pkg.dev/$GCP_PROJECT_ID/nginx-repo/nginx:latest
+
+      - run:
+          name: Deploy to Cloud Run
+          command: |
+            gcloud run deploy nginx-cloudrun \
+              --image us-central1-docker.pkg.dev/$GCP_PROJECT_ID/nginx-repo/nginx:latest \
+              --region us-central1 \
+              --platform managed \
+              --allow-unauthenticated
+
+workflows:
+  deploy:
+    jobs:
+      - deploy
